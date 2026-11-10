@@ -1,0 +1,177 @@
+{
+  "assets": [
+    {
+      "encoding": {
+        "file": "C:\\Users\\carlo\\Documents\\Flutter\\Farmacia\\farmacia\\backend\\.dart_tool\\hooks_runner\\shared\\llamadart\\build\\8e04c28b44\\llamadart_bin\\ggml-base.dll",
+        "id": "package:llamadart/ggml-base",
+        "link_mode": {
+          "type": "dynamic_loading_bundle"
+        }
+      },
+      "type": "code_assets/code"
+    },
+    {
+      "encoding": {
+        "file": "C:\\Users\\carlo\\Documents\\Flutter\\Farmacia\\farmacia\\backend\\.dart_tool\\hooks_runner\\shared\\llamadart\\build\\8e04c28b44\\llamadart_bin\\ggml-cpu.dll",
+        "id": "package:llamadart/ggml-cpu",
+        "link_mode": {
+          "type": "dynamic_loading_bundle"
+        }
+      },
+      "type": "code_assets/code"
+    },
+    {
+      "encoding": {
+        "file": "C:\\Users\\carlo\\Documents\\Flutter\\Farmacia\\farmacia\\backend\\.dart_tool\\hooks_runner\\shared\\llamadart\\build\\8e04c28b44\\llamadart_bin\\ggml-vulkan.dll",
+        "id": "package:llamadart/ggml-vulkan",
+        "link_mode": {
+          "type": "dynamic_loading_bundle"
+        }
+      },
+      "type": "code_assets/code"
+    },
+    {
+      "encoding": {
+        "file": "C:\\Users\\carlo\\Documents\\Flutter\\Farmacia\\farmacia\\backend\\.dart_tool\\hooks_runner\\shared\\llamadart\\build\\8e04c28b44\\llamadart_bin\\ggml.dll",
+        "id": "package:llamadart/ggml",
+        "link_mode": {
+          "type": "dynamic_loading_bundle"
+        }
+      },
+      "type": "code_assets/code"
+    },
+    {
+      "encoding": {
+        "file": "C:\\Users\\carlo\\Documents\\Flutter\\Farmacia\\farmacia\\backend\\.dart_tool\\hooks_runner\\shared\\llamadart\\build\\8e04c28b44\\llamadart_bin\\llama-common.dll",
+        "id": "package:llamadart/llama-common",
+        "link_mode": {
+          "type": "dynamic_loading_bundle"
+        }
+      },
+      "type": "code_assets/code"
+    },
+    {
+      "encoding": {
+        "file": "C:\\Users\\carlo\\Documents\\Flutter\\Farmacia\\farmacia\\backend\\.dart_tool\\hooks_runner\\shared\\llamadart\\build\\8e04c28b44\\llamadart_bin\\llama.dll",
+        "id": "package:llamadart/llamadart",
+        "link_mode": {
+          "type": "dynamic_loading_bundle"
+        }
+      },
+      "type": "code_assets/code"
+    },
+    {
+      "encoding": {
+        "file": "C:\\Users\\carlo\\Documents\\Flutter\\Farmacia\\farmacia\\backend\\.dart_tool\\hooks_runner\\shared\\llamadart\\build\\8e04c28b44\\llamadart_bin\\llamadart.dll",
+        "id": "package:llamadart/llamadart_wrapper",
+        "link_mode": {
+          "type": "dynamic_loading_bundle"
+        }
+      },
+      "type": "code_assets/code"
+    },
+    {
+      "encoding": {
+        "file": "C:\\Users\\carlo\\Documents\\Flutter\\Farmacia\\farmacia\\backend\\.dart_tool\\hooks_runner\\shared\\llamadart\\build\\8e04c28b44\\llamadart_bin\\mtmd.dll",
+        "id": "package:llamadart/mtmd",
+        "link_mode": {
+          "type": "dynamic_loading_bundle"
+        }
+      },
+      "type": "code_assets/code"
+    },
+    {
+      "encoding": {
+        "file": "C:\\Users\\carlo\\Documents\\Flutter\\Farmacia\\farmacia\\backend\\.dart_tool\\hooks_runner\\shared\\llamadart\\build\\8e04c28b44\\llamadart_bin\\vcomp140.dll",
+        "id": "package:llamadart/vcomp140",
+        "link_mode": {
+          "type": "dynamic_loading_bundle"
+        }
+      },
+      "type": "code_assets/code"
+    },
+    {
+      "encoding": {
+        "file": "C:\\Users\\carlo\\Documents\\Flutter\\Farmacia\\farmacia\\backend\\.dart_tool\\hooks_runner\\shared\\llamadart\\build\\8e04c28b44\\llamadart_bin\\LiteRtLm.dll",
+        "id": "package:llamadart/litert_lm_LiteRtLm",
+        "link_mode": {
+          "type": "dynamic_loading_bundle"
+        }
+      },
+      "type": "code_assets/code"
+    },
+    {
+      "encoding": {
+        "file": "C:\\Users\\carlo\\Documents\\Flutter\\Farmacia\\farmacia\\backend\\.dart_tool\\hooks_runner\\shared\\llamadart\\build\\8e04c28b44\\llamadart_bin\\dxcompiler.dll",
+        "id": "package:llamadart/litert_lm_dxcompiler",
+        "link_mode": {
+          "type": "dynamic_loading_bundle"
+        }
+      },
+      "type": "code_assets/code"
+    },
+    {
+      "encoding": {
+        "file": "C:\\Users\\carlo\\Documents\\Flutter\\Farmacia\\farmacia\\backend\\.dart_tool\\hooks_runner\\shared\\llamadart\\build\\8e04c28b44\\llamadart_bin\\dxil.dll",
+        "id": "package:llamadart/litert_lm_dxil",
+        "link_mode": {
+          "type": "dynamic_loading_bundle"
+        }
+      },
+      "type": "code_assets/code"
+    },
+    {
+      "encoding": {
+        "file": "C:\\Users\\carlo\\Documents\\Flutter\\Farmacia\\farmacia\\backend\\.dart_tool\\hooks_runner\\shared\\llamadart\\build\\8e04c28b44\\llamadart_bin\\libGemmaModelConstraintProvider.dll",
+        "id": "package:llamadart/litert_lm_GemmaModelConstraintProvider",
+        "link_mode": {
+          "type": "dynamic_loading_bundle"
+        }
+      },
+      "type": "code_assets/code"
+    },
+    {
+      "encoding": {
+        "file": "C:\\Users\\carlo\\Documents\\Flutter\\Farmacia\\farmacia\\backend\\.dart_tool\\hooks_runner\\shared\\llamadart\\build\\8e04c28b44\\llamadart_bin\\libLiteRt.dll",
+        "id": "package:llamadart/litert_lm_LiteRt",
+        "link_mode": {
+          "type": "dynamic_loading_bundle"
+        }
+      },
+      "type": "code_assets/code"
+    },
+    {
+      "encoding": {
+        "file": "C:\\Users\\carlo\\Documents\\Flutter\\Farmacia\\farmacia\\backend\\.dart_tool\\hooks_runner\\shared\\llamadart\\build\\8e04c28b44\\llamadart_bin\\libLiteRtTopKWebGpuSampler.dll",
+        "id": "package:llamadart/litert_lm_LiteRtTopKWebGpuSampler",
+        "link_mode": {
+          "type": "dynamic_loading_bundle"
+        }
+      },
+      "type": "code_assets/code"
+    },
+    {
+      "encoding": {
+        "file": "C:\\Users\\carlo\\Documents\\Flutter\\Farmacia\\farmacia\\backend\\.dart_tool\\hooks_runner\\shared\\llamadart\\build\\8e04c28b44\\llamadart_bin\\libLiteRtWebGpuAccelerator.dll",
+        "id": "package:llamadart/litert_lm_LiteRtWebGpuAccelerator",
+        "link_mode": {
+          "type": "dynamic_loading_bundle"
+        }
+      },
+      "type": "code_assets/code"
+    },
+    {
+      "encoding": {
+        "file": "C:\\Users\\carlo\\Documents\\Flutter\\Farmacia\\farmacia\\backend\\.dart_tool\\hooks_runner\\shared\\llamadart\\build\\8e04c28b44\\llamadart_bin\\libwebgpu_dawn.dll",
+        "id": "package:llamadart/litert_lm_webgpu_dawn",
+        "link_mode": {
+          "type": "dynamic_loading_bundle"
+        }
+      },
+      "type": "code_assets/code"
+    }
+  ],
+  "assets_for_linking": {},
+  "status": "success",
+  "timestamp": "2026-10-04 22:46:24.000"
+}

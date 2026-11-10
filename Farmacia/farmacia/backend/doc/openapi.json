@@ -1,0 +1,2225 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Farmacia API",
+    "description": "API REST de la farmacia con CRUD completo sobre las 10 tablas del esquema. Arquitectura limpia: `presentation` -> `domain` <- `data`.\n\n**Flujo de venta:** `POST /ordenes` (estado `PENDIENTE`) → `PUT /ordenes/{id}/estado` con `PAGADO` (descuenta el stock) → `POST /facturas`.\n\n**Convenciones**\n* Listas: `{\"total\": n, \"items\": [...]}` con paginación `limit`/`offset`.\n* `PUT` = actualización parcial: solo se modifican los campos enviados; dentro de ellos, `null` borra el valor.\n* `DELETE` → `204` sin cuerpo.\n* Errores: `{\"error\": {\"code\": \"...\", \"message\": \"...\"}}` con `400` (validación), `404` (no existe), `409` (conflicto de negocio/integridad) o `503` (BD caída).\n\n**Autenticación**: todas las rutas (salvo `health`, `network`, `auth/login`, `docs` y las imágenes) exigen `Authorization: Bearer <token>` obtenido en `POST /api/v1/auth/login`. Sin token la API responde `401` con `error.code = sesion_requerida`.",
+    "version": "0.1.0"
+  },
+  "servers": [
+    { "url": "http://localhost:8080", "description": "Servidor local" }
+  ],
+  "security": [
+    { "bearerAuth": [] }
+  ],
+  "tags": [
+    { "name": "salud", "description": "Estado del servicio y de la base de datos" },
+    { "name": "productos", "description": "Productos de la farmacia" },
+    { "name": "categorias", "description": "Categorías y presentaciones" },
+    { "name": "personas", "description": "Clientes, proveedores y empleados" },
+    { "name": "usuarios", "description": "Usuarios del sistema (acceso)" },
+    { "name": "roles", "description": "Roles y permisos (RBAC: módulo × acción)" },
+    { "name": "auditoria", "description": "Auditoría de cambios (quién hizo qué, cuándo y con qué resultado)" },
+    { "name": "auth", "description": "Inicio y cierre de sesión (login)" },
+    { "name": "ordenes", "description": "Órdenes de pedido y sus detalles" },
+    { "name": "facturas", "description": "Facturas emitidas por las órdenes" },
+    { "name": "reportes", "description": "Reportes agregados del dashboard" },
+    { "name": "ajustes", "description": "Ajustes globales del sistema (escribe con permiso ajustes.editar)" },
+    { "name": "respaldos", "description": "Respaldos de la base de datos con pg_dump (crear, listar y descargar)" },
+    { "name": "archivos", "description": "Imágenes locales de los productos" },
+    { "name": "docs", "description": "Documentación interactiva" }
+  ],
+  "paths": {
+    "/docs": {
+      "get": {
+        "tags": ["docs"],
+        "summary": "Swagger UI",
+        "description": "Interfaz interactiva para probar todos los endpoints. Deshabilitable con la variable de entorno `DOCS_ENABLED=false`.",
+        "operationId": "getDocs",
+        "security": [],
+        "responses": {
+          "200": { "description": "Página HTML de Swagger UI" },
+          "404": { "description": "Documentación deshabilitada" }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "tags": ["docs"],
+        "summary": "Especificación OpenAPI",
+        "description": "Documento JSON que alimenta Swagger UI (este mismo archivo).",
+        "operationId": "getOpenapiSpec",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Especificación OpenAPI 3.0",
+            "content": { "application/json": { "schema": { "type": "object" } } }
+          }
+        }
+      }
+    },
+
+    "/api/v1/health": {
+      "get": {
+        "tags": ["salud"],
+        "summary": "Estado del servicio",
+        "description": "Devuelve el estado de la API y si la base de datos responde. Siempre responde 200: un backend caído se refleja en `database: down`.",
+        "operationId": "getHealth",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Estado del servicio",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HealthStatus" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/api/v1/network": {
+      "get": {
+        "tags": ["salud"],
+        "summary": "IPs locales de la máquina",
+        "description": "IPv4 de la PC, con las redes privadas de LAN primero. El frontend web la usa para construir la URL del QR de acceso cuando la página se abrió en `localhost` (desde el celular `localhost` sería el propio teléfono).",
+        "operationId": "getNetwork",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Interfaces de red con IP",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ipv4", "interfaces"],
+                  "properties": {
+                    "ipv4": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "description": "Todas las IPv4, redes privadas primero."
+                    },
+                    "interfaces": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["name", "ipv4"],
+                        "properties": {
+                          "name": { "type": "string" },
+                          "ipv4": { "type": "array", "items": { "type": "string" } }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/api/v1/network/hotspot": {
+      "post": {
+        "tags": ["salud"],
+        "summary": "Encender el punto de acceso de la PC (permiso `ajustes.editar`)",
+        "description": "Para entrar por QR cuando **no hay internet**: la PC comparte su propia red y el celular se conecta a ella. Intenta encender el hotspot moderno de Windows reutilizando la configuración que el usuario ya tenga guardada (la API no fija SSID ni clave); si Windows no lo permite, abre la página de Ajustes correspondiente y devuelve `accion: abrir_ajustes` para que solo falte el interruptor. El estado se decide comprobando si existe la interfaz `192.168.137.1` (subred ICS, la misma en cualquier equipo).",
+        "operationId": "encenderPuntoAcceso",
+        "responses": {
+          "200": {
+            "description": "Estado del punto de acceso tras el intento",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["estado"],
+                  "properties": {
+                    "estado": {
+                      "type": "string",
+                      "enum": ["activo", "apagado"],
+                      "description": "`activo` si `192.168.137.1` está entre las interfaces activas."
+                    },
+                    "ip": {
+                      "type": "string",
+                      "description": "IP del punto de acceso; solo cuando `estado = activo`.",
+                      "example": "192.168.137.1"
+                    },
+                    "accion": {
+                      "type": "string",
+                      "enum": ["abrir_ajustes"],
+                      "description": "Presente cuando no se pudo encender desde la API y se abrió la página de Ajustes de Windows."
+                    }
+                  }
+                },
+                "example": { "estado": "activo", "ip": "192.168.137.1" }
+              }
+            }
+          },
+          "401": { "description": "Sesión no válida o caducada" },
+          "403": { "description": "La cuenta no tiene el permiso `ajustes.editar`" }
+        }
+      }
+    },
+
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "Iniciar sesión",
+        "description": "Valida usuario y contraseña y abre una sesión. Con `recuerdame: true` la sesión dura 30 días y el cliente guarda token, usuario y contraseña en el equipo (autologin hasta pulsar `POST /auth/logout`); sin él dura 24 horas y no se persiste nada.",
+        "operationId": "login",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["nombreUsuario", "contrasena"],
+                "properties": {
+                  "nombreUsuario": { "type": "string", "minLength": 4, "maxLength": 50 },
+                  "contrasena": { "type": "string", "format": "password", "maxLength": 255 },
+                  "recuerdame": { "type": "boolean", "default": false, "description": "Alarga la sesión a 30 días y habilita el guardado local de credenciales." }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sesión abierta",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Sesion" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "401": {
+            "description": "Usuario o contraseña incorrectos (`credenciales_invalidas`).",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "403": {
+            "description": "La cuenta no está activa (`cuenta_inactiva`).",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "Cerrar sesión",
+        "description": "Borra la sesión en el servidor: el token deja de servir en el resto de peticiones (el cierre de sesión corta el acceso de verdad, no solo en el cliente).",
+        "operationId": "logout",
+        "responses": {
+          "200": { "description": "Sesión invalidada." },
+          "401": {
+            "description": "Sin sesión o token caducado.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+
+    "/api/v1/auth/me": {
+      "get": {
+        "tags": ["auth"],
+        "summary": "Usuario de la sesión actual",
+        "description": "Devuelve la cuenta dueña del token enviado y cuándo caduca la sesión. El frontend la usa al arrancar para restaurar la sesión guardada.",
+        "operationId": "getMe",
+        "responses": {
+          "200": {
+            "description": "Sesión vigente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["usuario", "expiraEn"],
+                  "properties": {
+                    "usuario": { "$ref": "#/components/schemas/Usuario" },
+                    "expiraEn": { "type": "string", "format": "date-time" }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sin sesión o token caducado.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+
+    "/api/v1/products": {
+      "get": {
+        "tags": ["productos"],
+        "summary": "Listar productos",
+        "description": "Listado paginado ordenado por nombre. Alias español: `GET /api/v1/productos`.",
+        "operationId": "getProducts",
+        "parameters": [
+          { "$ref": "#/components/parameters/limit" },
+          { "$ref": "#/components/parameters/offset" },
+          {
+            "name": "estado",
+            "in": "query",
+            "required": false,
+            "description": "Filtra por el enum `estado_producto`.",
+            "schema": { "type": "string", "enum": ["DISPONIBLE", "AGOTADO", "POR_VENCER", "DESCONTINUADO", "ELIMINADO"] }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Productos",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProductList" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "post": {
+        "tags": ["productos"],
+        "summary": "Crear producto",
+        "operationId": "createProduct",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ProductInput" },
+              "example": {
+                "nombre": "Ibuprofeno 600 mg",
+                "imagen": "https://picsum.photos/seed/ibuprofeno/200",
+                "precioVenta": 2.45,
+                "precioCompra": 1.2,
+                "fechaVencimiento": "2027-06-30",
+                "stock": 20,
+                "categoriaId": 1,
+                "estado": "DISPONIBLE"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Producto creado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Product" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/products/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/id" }],
+      "get": {
+        "tags": ["productos"],
+        "summary": "Obtener un producto",
+        "operationId": "getProduct",
+        "responses": {
+          "200": { "description": "Producto", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Product" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "put": {
+        "tags": ["productos"],
+        "summary": "Actualizar producto (parcial)",
+        "description": "Solo se escriben los campos enviados; `null` borra el valor (p. ej. `imagen`).",
+        "operationId": "updateProduct",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProductPatch" } } }
+        },
+        "responses": {
+          "200": { "description": "Producto actualizado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Product" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "delete": {
+        "tags": ["productos"],
+        "summary": "Eliminar producto",
+        "description": "Borrado lógico: la fila no se borra; pasa a `estado = ELIMINADO`, deja de aparecer en los listados y, si ya estaba oculta, la API responde `404`.",
+        "operationId": "deleteProduct",
+        "responses": {
+          "204": { "description": "Oculto (estado = ELIMINADO); la fila permanece en la base de datos." },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/categorias": {
+      "get": {
+        "tags": ["categorias"],
+        "summary": "Listar categorías",
+        "operationId": "getCategorias",
+        "parameters": [
+          { "$ref": "#/components/parameters/limit" },
+          { "$ref": "#/components/parameters/offset" },
+          {
+            "name": "estado",
+            "in": "query",
+            "required": false,
+            "description": "Filtra por el enum `estado_general`.",
+            "schema": { "type": "string", "enum": ["ACTIVO", "INACTIVO", "BLOQUEADO", "ELIMINADO"] }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Lista de categorías", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CategoriaList" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "post": {
+        "tags": ["categorias"],
+        "summary": "Crear categoría",
+        "operationId": "createCategoria",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/NombreEstadoInput" },
+              "example": { "nombre": "Analgésicos", "estado": "ACTIVO" }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Categoría creada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Categoria" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/categorias/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/id" }],
+      "get": {
+        "tags": ["categorias"],
+        "summary": "Obtener una categoría",
+        "operationId": "getCategoria",
+        "responses": {
+          "200": { "description": "Categoría", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Categoria" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "put": {
+        "tags": ["categorias"],
+        "summary": "Actualizar categoría (parcial)",
+        "operationId": "updateCategoria",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NombreEstadoPatch" } } }
+        },
+        "responses": {
+          "200": { "description": "Categoría actualizada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Categoria" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "delete": {
+        "tags": ["categorias"],
+        "summary": "Eliminar categoría",
+        "description": "Borrado lógico: la fila no se borra; pasa a `estado = ELIMINADO`, deja de aparecer en los listados y, si ya estaba oculta, la API responde `404`.",
+        "operationId": "deleteCategoria",
+        "responses": {
+          "204": { "description": "Oculta (estado = ELIMINADO); la fila permanece en la base de datos." },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/presentaciones": {
+      "get": {
+        "tags": ["categorias"],
+        "summary": "Listar presentaciones",
+        "operationId": "getPresentaciones",
+        "parameters": [
+          { "$ref": "#/components/parameters/limit" },
+          { "$ref": "#/components/parameters/offset" },
+          {
+            "name": "estado",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "enum": ["ACTIVO", "INACTIVO", "BLOQUEADO", "ELIMINADO"] }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Lista de presentaciones", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/PresentacionList" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "post": {
+        "tags": ["categorias"],
+        "summary": "Crear presentación",
+        "operationId": "createPresentacion",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/NombreEstadoInput" },
+              "example": { "nombre": "Comprimido", "estado": "ACTIVO" }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Presentación creada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Presentacion" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/presentaciones/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/id" }],
+      "get": {
+        "tags": ["categorias"],
+        "summary": "Obtener una presentación",
+        "operationId": "getPresentacion",
+        "responses": {
+          "200": { "description": "Presentación", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Presentacion" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "put": {
+        "tags": ["categorias"],
+        "summary": "Actualizar presentación (parcial)",
+        "operationId": "updatePresentacion",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NombreEstadoPatch" } } }
+        },
+        "responses": {
+          "200": { "description": "Presentación actualizada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Presentacion" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "delete": {
+        "tags": ["categorias"],
+        "summary": "Eliminar presentación",
+        "description": "Borrado lógico: la fila no se borra; pasa a `estado = ELIMINADO`, deja de aparecer en los listados y, si ya estaba oculta, la API responde `404`.",
+        "operationId": "deletePresentacion",
+        "responses": {
+          "204": { "description": "Oculta (estado = ELIMINADO); la fila permanece en la base de datos." },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/clientes": {
+      "get": {
+        "tags": ["personas"],
+        "summary": "Listar clientes",
+        "operationId": "getClientes",
+        "parameters": [
+          { "$ref": "#/components/parameters/limit" },
+          { "$ref": "#/components/parameters/offset" },
+          {
+            "name": "estado",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "enum": ["ACTIVO", "INACTIVO", "BLOQUEADO", "ELIMINADO"] }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Lista de clientes", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ClienteList" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "post": {
+        "tags": ["personas"],
+        "summary": "Crear cliente",
+        "description": "`ci` es único: repetirlo devuelve `409`.",
+        "operationId": "createCliente",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ClienteInput" },
+              "example": { "nombre": "María", "apellido": "Pérez", "ci": "45678912", "genero": "F", "ciudad": "Lima", "estado": "ACTIVO" }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Cliente creado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Cliente" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/clientes/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/id" }],
+      "get": {
+        "tags": ["personas"],
+        "summary": "Obtener un cliente",
+        "operationId": "getCliente",
+        "responses": {
+          "200": { "description": "Cliente", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Cliente" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "put": {
+        "tags": ["personas"],
+        "summary": "Actualizar cliente (parcial)",
+        "operationId": "updateCliente",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ClientePatch" } } }
+        },
+        "responses": {
+          "200": { "description": "Cliente actualizado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Cliente" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "delete": {
+        "tags": ["personas"],
+        "summary": "Eliminar cliente",
+        "description": "Borrado lógico: la fila no se borra; pasa a `estado = ELIMINADO`, deja de aparecer en los listados y, si ya estaba oculta, la API responde `404`.",
+        "operationId": "deleteCliente",
+        "responses": {
+          "204": { "description": "Oculto (estado = ELIMINADO); la fila permanece en la base de datos." },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/proveedores": {
+      "get": {
+        "tags": ["personas"],
+        "summary": "Listar proveedores",
+        "operationId": "getProveedores",
+        "parameters": [
+          { "$ref": "#/components/parameters/limit" },
+          { "$ref": "#/components/parameters/offset" },
+          {
+            "name": "estado",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "enum": ["ACTIVO", "INACTIVO", "BLOQUEADO", "ELIMINADO"] }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Lista de proveedores", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProveedorList" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "post": {
+        "tags": ["personas"],
+        "summary": "Crear proveedor",
+        "operationId": "createProveedor",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ProveedorInput" },
+              "example": { "nombre": "Distribuidora Salud S.A.", "ciudad": "Lima", "telefono": "555-1234", "estado": "ACTIVO" }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Proveedor creado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Proveedor" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/proveedores/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/id" }],
+      "get": {
+        "tags": ["personas"],
+        "summary": "Obtener un proveedor",
+        "operationId": "getProveedor",
+        "responses": {
+          "200": { "description": "Proveedor", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Proveedor" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "put": {
+        "tags": ["personas"],
+        "summary": "Actualizar proveedor (parcial)",
+        "operationId": "updateProveedor",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProveedorPatch" } } }
+        },
+        "responses": {
+          "200": { "description": "Proveedor actualizado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Proveedor" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "delete": {
+        "tags": ["personas"],
+        "summary": "Eliminar proveedor",
+        "description": "Borrado lógico: la fila no se borra; pasa a `estado = ELIMINADO`, deja de aparecer en los listados y, si ya estaba oculta, la API responde `404`.",
+        "operationId": "deleteProveedor",
+        "responses": {
+          "204": { "description": "Oculto (estado = ELIMINADO); la fila permanece en la base de datos." },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/empleados": {
+      "get": {
+        "tags": ["personas"],
+        "summary": "Listar empleados",
+        "operationId": "getEmpleados",
+        "parameters": [
+          { "$ref": "#/components/parameters/limit" },
+          { "$ref": "#/components/parameters/offset" },
+          {
+            "name": "estado",
+            "in": "query",
+            "required": false,
+            "description": "Enum `estado_empleado`.",
+            "schema": { "type": "string", "enum": ["ACTIVO", "VACACIONES", "LICENCIA", "INACTIVO", "ELIMINADO"] }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Lista de empleados", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmpleadoList" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "post": {
+        "tags": ["personas"],
+        "summary": "Crear empleado",
+        "description": "La BD exige `edad >= 18`: se valida antes de guardar (`400`).",
+        "operationId": "createEmpleado",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/EmpleadoInput" },
+              "example": { "nombre": "Juan", "apellido": "Vargas", "edad": 25, "estado": "ACTIVO" }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Empleado creado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Empleado" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/empleados/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/id" }],
+      "get": {
+        "tags": ["personas"],
+        "summary": "Obtener un empleado",
+        "operationId": "getEmpleado",
+        "responses": {
+          "200": { "description": "Empleado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Empleado" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "put": {
+        "tags": ["personas"],
+        "summary": "Actualizar empleado (parcial)",
+        "operationId": "updateEmpleado",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmpleadoPatch" } } }
+        },
+        "responses": {
+          "200": { "description": "Empleado actualizado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Empleado" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "delete": {
+        "tags": ["personas"],
+        "summary": "Eliminar empleado",
+        "description": "Borrado lógico: la fila no se borra; pasa a `estado = ELIMINADO`, deja de aparecer en los listados y, si ya estaba oculta, la API responde `404`.",
+        "operationId": "deleteEmpleado",
+        "responses": {
+          "204": { "description": "Oculto (estado = ELIMINADO); la fila permanece en la base de datos." },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/usuarios": {
+      "get": {
+        "tags": ["usuarios"],
+        "summary": "Listar usuarios",
+        "description": "La contraseña nunca se devuelve.",
+        "operationId": "getUsuarios",
+        "parameters": [
+          { "$ref": "#/components/parameters/limit" },
+          { "$ref": "#/components/parameters/offset" },
+          {
+            "name": "estado",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "enum": ["ACTIVO", "INACTIVO", "BLOQUEADO", "ELIMINADO"] }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Lista de usuarios", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsuarioList" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "post": {
+        "tags": ["usuarios"],
+        "summary": "Crear usuario",
+        "description": "`nombreUsuario` es único (`409` si se repite). `contrasena` es de solo escritura: se envía aquí y no vuelve nunca en las respuestas.",
+        "operationId": "createUsuario",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UsuarioInput" },
+              "example": { "nombreUsuario": "mlopez", "contrasena": "secreto123", "rolId": 1, "empleadoId": 1, "estado": "ACTIVO" }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Usuario creado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Usuario" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/usuarios/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/id" }],
+      "get": {
+        "tags": ["usuarios"],
+        "summary": "Obtener un usuario",
+        "operationId": "getUsuario",
+        "responses": {
+          "200": { "description": "Usuario", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Usuario" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "put": {
+        "tags": ["usuarios"],
+        "summary": "Actualizar usuario (parcial)",
+        "description": "Envía `contrasena` para cambiarla; nunca se lee ni se devuelve.",
+        "operationId": "updateUsuario",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UsuarioPatch" } } }
+        },
+        "responses": {
+          "200": { "description": "Usuario actualizado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Usuario" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "delete": {
+        "tags": ["usuarios"],
+        "summary": "Eliminar usuario",
+        "description": "Borrado lógico: la fila no se borra; pasa a `estado = ELIMINADO`, deja de aparecer en los listados y, si ya estaba oculta, la API responde `404`. `409` si es la única cuenta ADMIN activa.",
+        "operationId": "deleteUsuario",
+        "responses": {
+          "204": { "description": "Oculto (estado = ELIMINADO); la fila permanece en la base de datos." },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/roles": {
+      "get": {
+        "tags": ["roles"],
+        "summary": "Listar roles con sus permisos",
+        "description": "Exige `usuarios.ver` (lo necesita el desplegable de la ficha de usuario).",
+        "operationId": "getRoles",
+        "parameters": [
+          { "$ref": "#/components/parameters/limit" },
+          { "$ref": "#/components/parameters/offset" },
+          {
+            "name": "estado",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "enum": ["ACTIVO", "INACTIVO", "BLOQUEADO", "ELIMINADO"] }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Lista de roles", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RolList" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "post": {
+        "tags": ["roles"],
+        "summary": "Crear un rol",
+        "description": "Exige `usuarios.editar`. `permisos` es una lista de `modulo.accion` (p. ej. `ventas.crear`); un permiso desconocido responde `400`. El rol ADMIN no se puede crear ni modificar desde aquí.",
+        "operationId": "createRol",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RolInput" },
+              "example": { "nombre": "ALMACENERO", "descripcion": "Gestiona productos y proveedores", "permisos": ["productos.ver", "productos.crear", "productos.editar", "proveedores.ver"] }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Rol creado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Rol" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/roles/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/id" }],
+      "get": {
+        "tags": ["roles"],
+        "summary": "Obtener un rol",
+        "operationId": "getRol",
+        "responses": {
+          "200": { "description": "Rol", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Rol" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "put": {
+        "tags": ["roles"],
+        "summary": "Actualizar rol (parcial)",
+        "description": "Exige `usuarios.editar`. Enviar `permisos` reemplaza el conjunto completo. El rol ADMIN no se modifica (`409 rol_protegido`).",
+        "operationId": "updateRol",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RolPatch" } } }
+        },
+        "responses": {
+          "200": { "description": "Rol actualizado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Rol" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "delete": {
+        "tags": ["roles"],
+        "summary": "Eliminar rol",
+        "description": "Borrado lógico (`estado = ELIMINADO`). `409 rol_sistema` si es un rol de la semilla (ADMIN/CAJERO/VENDEDOR); `409 rol_en_uso` si tiene usuarios activos asignados.",
+        "operationId": "deleteRol",
+        "responses": {
+          "204": { "description": "Oculto (estado = ELIMINADO)." },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/auditoria": {
+      "get": {
+        "tags": ["auditoria"],
+        "summary": "Listar eventos de auditoría",
+        "description": "Exige `auditoria.ver`. Más recientes primero. Filtros opcionales: `usuario` (búsqueda parcial), `desde`/`hasta` (`yyyy-MM-dd`; el día `hasta` está incluido), `entidad` y `accion`.",
+        "operationId": "getAuditoria",
+        "parameters": [
+          { "$ref": "#/components/parameters/limit" },
+          { "$ref": "#/components/parameters/offset" },
+          { "name": "usuario", "in": "query", "required": false, "description": "Búsqueda parcial sobre el nombre de usuario.", "schema": { "type": "string" } },
+          { "name": "desde", "in": "query", "required": false, "schema": { "type": "string", "format": "date" } },
+          { "name": "hasta", "in": "query", "required": false, "schema": { "type": "string", "format": "date" } },
+          { "name": "entidad", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "accion", "in": "query", "required": false, "schema": { "type": "string", "enum": ["LOGIN", "LOGIN_FALLIDO", "LOGOUT", "CREAR", "ACTUALIZAR", "ELIMINAR", "RESTABLECER_CONTRASENA"] } }
+        ],
+        "responses": {
+          "200": { "description": "Eventos", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AuditoriaList" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/auditoria/antes-de/{fecha}": {
+      "parameters": [
+        { "name": "fecha", "in": "path", "required": true, "description": "Día límite (yyyy-MM-dd): se borra todo lo anterior.", "schema": { "type": "string", "format": "date" } }
+      ],
+      "delete": {
+        "tags": ["auditoria"],
+        "summary": "Purgar auditoría por antigüedad",
+        "description": "Exige `auditoria.eliminar`. El evento de la propia purga queda registrado (se inserta después del borrado).",
+        "operationId": "purgarAuditoria",
+        "responses": {
+          "200": { "description": "Eventos borrados.", "content": { "application/json": { "schema": { "type": "object", "properties": { "eliminados": { "type": "integer" } } } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/auditoria/todo": {
+      "delete": {
+        "tags": ["auditoria"],
+        "summary": "Vaciar la auditoría",
+        "description": "Exige `auditoria.eliminar`. Borra todos los eventos y devuelve el recuento; el evento de la purga queda registrado.",
+        "operationId": "vaciarAuditoria",
+        "responses": {
+          "200": { "description": "Eventos borrados.", "content": { "application/json": { "schema": { "type": "object", "properties": { "eliminados": { "type": "integer" } } } } } },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/ordenes": {
+      "get": {
+        "tags": ["ordenes"],
+        "summary": "Listar órdenes",
+        "description": "Solo la cabecera; los líneas se obtienen con `GET /ordenes/{id}` (incluye `detalles`).",
+        "operationId": "getOrdenes",
+        "parameters": [
+          { "$ref": "#/components/parameters/limit" },
+          { "$ref": "#/components/parameters/offset" },
+          {
+            "name": "estado",
+            "in": "query",
+            "required": false,
+            "description": "Enum `estado_orden`.",
+            "schema": { "type": "string", "enum": ["PENDIENTE", "PAGADO", "CANCELADO", "DEVUELTO", "ELIMINADO"] }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Lista de órdenes", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OrdenList" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "post": {
+        "tags": ["ordenes"],
+        "summary": "Crear orden de pedido",
+        "description": "Crea la cabecera, sus líneas y su desglose de pagos en una transacción. Valida que cada producto exista, no esté `DESCONTINUADO` y tenga stock suficiente; calcula `total = Σ(cantidad × precioVenta)` y exige que la suma de los montos de `pagos` cuadre con ese total (pago mixto: efectivo + Yape + ...). Deja la orden en `PENDIENTE` (aún no descuenta stock).",
+        "operationId": "createOrden",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/OrdenInput" },
+              "example": {
+                "pagos": [
+                  { "metodoPago": "EFECTIVO", "monto": 5.00, "referencia": null },
+                  { "metodoPago": "YAPE", "monto": 2.35, "referencia": "OPER-88231" }
+                ],
+                "clienteId": 1,
+                "nombreCliente": "María Pérez",
+                "empleadoId": 1,
+                "items": [
+                  { "productoId": 1, "cantidad": 3 },
+                  { "productoId": 2, "cantidad": 1 }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Orden creada con sus detalles",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OrdenConDetalles" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/ordenes/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/id" }],
+      "get": {
+        "tags": ["ordenes"],
+        "summary": "Obtener una orden con sus detalles",
+        "operationId": "getOrden",
+        "responses": {
+          "200": { "description": "Orden con sus líneas", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OrdenConDetalles" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "delete": {
+        "tags": ["ordenes"],
+        "summary": "Eliminar orden",
+        "description": "Borrado lógico: la fila no se borra; pasa a `estado = ELIMINADO`, deja de aparecer en los listados y, si ya estaba oculta, la API responde `404`.",
+        "operationId": "deleteOrden",
+        "responses": {
+          "204": { "description": "Oculta (estado = ELIMINADO); la fila permanece en la base de datos." },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/ordenes/{id}/estado": {
+      "parameters": [{ "$ref": "#/components/parameters/id" }],
+      "put": {
+        "tags": ["ordenes"],
+        "summary": "Cambiar el estado de la orden",
+        "description": "Regla de stock: entrar en `PAGADO` descuenta el stock de cada línea (y falla con `409` si falta); salir de `PAGADO` hacia `CANCELADO`/`DEVUELTO`/`PENDIENTE` lo repone.",
+        "operationId": "updateOrdenEstado",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/EstadoOrdenInput" },
+              "example": { "estado": "PAGADO" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Orden con el nuevo estado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OrdenPedido" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/ordenes/{id}/detalles": {
+      "parameters": [{ "$ref": "#/components/parameters/id" }],
+      "get": {
+        "tags": ["ordenes"],
+        "summary": "Listar los detalles de una orden",
+        "operationId": "getDetalles",
+        "responses": {
+          "200": { "description": "Líneas de la orden", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DetalleList" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "post": {
+        "tags": ["ordenes"],
+        "summary": "Agregar (o reemplazar) una línea",
+        "description": "Si el producto ya estaba en la orden, se reemplaza su cantidad. Se recalcula `total`. Solo en órdenes `PENDIENTE` o `DEVUELTO`.",
+        "operationId": "addDetalle",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DetalleInput" },
+              "example": { "productoId": 1, "cantidad": 2 }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Línea guardada", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DetalleOrden" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/ordenes/{id}/detalles/{productoId}": {
+      "parameters": [
+        { "$ref": "#/components/parameters/id" },
+        { "$ref": "#/components/parameters/productoId" }
+      ],
+      "delete": {
+        "tags": ["ordenes"],
+        "summary": "Quitar una línea y recalcular el total",
+        "description": "Borrado lógico: la fila no se borra; pasa a `estado = ELIMINADO`, deja de aparecer en los listados y, si ya estaba oculta, la API responde `404`.",
+        "operationId": "deleteDetalle",
+        "responses": {
+          "204": { "description": "Línea oculta (estado = ELIMINADO) y total recalculado." },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/facturas": {
+      "get": {
+        "tags": ["facturas"],
+        "summary": "Listar facturas",
+        "operationId": "getFacturas",
+        "parameters": [
+          { "$ref": "#/components/parameters/limit" },
+          { "$ref": "#/components/parameters/offset" },
+          {
+            "name": "estado",
+            "in": "query",
+            "required": false,
+            "description": "Enum `estado_factura`.",
+            "schema": { "type": "string", "enum": ["EMITIDA", "ANULADA", "ELIMINADO"] }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Lista de facturas", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FacturaList" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "post": {
+        "tags": ["facturas"],
+        "summary": "Emitir factura de una orden",
+        "description": "La orden debe estar `PAGADO` y no tener aún una factura (`409` en caso contrario). La factura copia los importes ya cobrados de la orden (`subtotal`, `rebaja` e `iva`); no se pide ningún importe.",
+        "operationId": "createFactura",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/FacturaInput" },
+              "example": { "ordenId": 1 }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Factura emitida", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Factura" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/facturas/{id}": {
+      "parameters": [{ "$ref": "#/components/parameters/id" }],
+      "get": {
+        "tags": ["facturas"],
+        "summary": "Obtener una factura",
+        "operationId": "getFactura",
+        "responses": {
+          "200": { "description": "Factura", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Factura" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "delete": {
+        "tags": ["facturas"],
+        "summary": "Eliminar factura",
+        "description": "Borrado lógico: la fila no se borra; pasa a `estado = ELIMINADO`, deja de aparecer en los listados y, si ya estaba oculta, la API responde `404`.",
+        "operationId": "deleteFactura",
+        "responses": {
+          "204": { "description": "Oculta (estado = ELIMINADO); la fila permanece en la base de datos." },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/facturas/{id}/estado": {
+      "parameters": [{ "$ref": "#/components/parameters/id" }],
+      "put": {
+        "tags": ["facturas"],
+        "summary": "Anular o reactivar una factura",
+        "operationId": "updateFacturaEstado",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/EstadoFacturaInput" },
+              "example": { "estado": "ANULADA" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Factura con el nuevo estado", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Factura" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/reportes/productos-vendidos": {
+      "get": {
+        "tags": ["reportes"],
+        "summary": "Ranking de productos por unidades vendidas",
+        "description": "Agrupa `detalles_ordenes_pedidos` por producto. Solo cuentan las líneas de órdenes no anuladas (`PENDIENTE` o `PAGADO`); con `orden=asc` aparecen también los productos que nunca se han vendido, con `unidades = 0`. `total` es el número de filas devueltas.",
+        "operationId": "getProductosVendidos",
+        "parameters": [
+          { "name": "limite", "in": "query", "required": false, "description": "Cuántos productos se devuelven.", "schema": { "type": "integer", "minimum": 1, "maximum": 50, "default": 6 } },
+          { "name": "orden", "in": "query", "required": false, "description": "`desc` = más vendidos; `asc` = menos vendidos.", "schema": { "type": "string", "enum": ["desc", "asc"], "default": "desc" } }
+        ],
+        "responses": {
+          "200": { "description": "Ranking de ventas", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VentaProductoList" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/archivos/imagenes": {
+      "post": {
+        "tags": ["archivos"],
+        "summary": "Sube una imagen al almacenamiento local",
+        "description": "Guarda el binario en el servidor (máx. 3 MB; PNG, JPG, GIF o WebP, validado por magic bytes) y devuelve la ruta que hay que persistir en el recurso (`productos.imagen`). El cuerpo es JSON con el fichero codificado en base64; también se admite el formato data URL (`data:image/png;base64,...`).",
+        "operationId": "subirImagen",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ImagenSubida" },
+              "example": { "nombre": "ibuprofeno.jpg", "datos": "/9j/4AAQSkZJRgABAQ..." }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Imagen guardada en local.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ImagenRuta" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" }
+        }
+      }
+    },
+
+    "/api/v1/archivos/imagenes/{nombre}": {
+      "get": {
+        "tags": ["archivos"],
+        "summary": "Sirve una imagen guardada",
+        "description": "Devuelve el fichero con su content-type y cachas largas (el nombre es inmutable, se sirve con ETag).",
+        "operationId": "getImagen",
+        "security": [],
+        "parameters": [
+          {
+            "name": "nombre",
+            "in": "path",
+            "required": true,
+            "description": "Nombre del fichero devuelto al subir la imagen.",
+            "schema": { "type": "string", "pattern": "^[a-z0-9]{10,32}\\.[a-z0-9]{2,5}$" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Imagen.",
+            "content": { "image/jpeg": { "schema": { "type": "string", "format": "binary" } } }
+          },
+          "304": { "description": "Sin cambios: el ETag enviado coincide." },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+
+    "/api/v1/ajustes": {
+      "get": {
+        "tags": ["ajustes"],
+        "summary": "Listar los ajustes guardados",
+        "description": "Una fila por clave con el valor guardado en la BD. Las claves que todavía no existen no aparecen: quien consulta aplica sus valores por defecto (los mismos que la app usa antes de tener nada guardado).",
+        "operationId": "listarAjustes",
+        "responses": {
+          "200": { "description": "Ajustes guardados.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AjusteList" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "put": {
+        "tags": ["ajustes"],
+        "summary": "Guardar ajustes (permiso `ajustes.editar`)",
+        "description": "Exige el permiso `ajustes.editar` en el rol de la sesión (por defecto solo el rol ADMIN lo tiene). Valida **todo el lote antes de escribir** (clave desconocida o número fuera de rango → `400` y no se guarda nada) y después hace upsert por clave. Solo admite valor vacío en `vendedorPorDefecto`, `clientePorDefecto`, `paginaInicial` y en las claves `defecto.<entidad>.<campo>` (valor por defecto de un desplegable: `''` significa «sin valor por defecto»).",
+        "operationId": "guardarAjustes",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AjusteInput" },
+              "example": { "valores": { "porPagina": "20", "tipoPagoPorDefecto": "YAPE" } }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Lote guardado.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AjusteAcuse" } } } },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": {
+            "description": "La cuenta no tiene el permiso `ajustes.editar` (`permiso_denegado`).",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/respaldos": {
+      "get": {
+        "tags": ["respaldos"],
+        "summary": "Listar los respaldos existentes",
+        "description": "Devuelve los `.dump` de la carpeta de respaldos, del más reciente al más antiguo. Exige el permiso `ajustes.ver`. Se conservan los 30 más recientes: al crear uno nuevo, los demás se podan.",
+        "operationId": "listarRespaldos",
+        "responses": {
+          "200": { "description": "Respaldos existentes.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RespaldoList" } } } },
+          "403": {
+            "description": "La cuenta no tiene el permiso `ajustes.ver` (`permiso_denegado`).",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      },
+      "post": {
+        "tags": ["respaldos"],
+        "summary": "Crear un respaldo ahora (permiso `ajustes.editar`)",
+        "description": "Ejecuta `pg_dump -Fc` contra la base de datos y escribe el `.dump` en el servidor. No recibe cuerpo. Un respaldo manual vuelve a poner en cero la cuenta del respaldo automático (ajuste `respaldoIntervalo`). Si `pg_dump` no está disponible o falla, responde `503` con `code = respaldo_fallido`.",
+        "operationId": "crearRespaldo",
+        "responses": {
+          "201": { "description": "Respaldo creado.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Respaldo" } } } },
+          "403": {
+            "description": "La cuenta no tiene el permiso `ajustes.editar` (`permiso_denegado`).",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    },
+
+    "/api/v1/respaldos/{nombre}/descarga": {
+      "get": {
+        "tags": ["respaldos"],
+        "summary": "Descargar un respaldo",
+        "description": "Devuelve los bytes del `.dump` con `content-disposition: attachment`, para que el navegador o el cliente lo guarden en el equipo. Exige el permiso `ajustes.editar`.",
+        "operationId": "descargarRespaldo",
+        "parameters": [
+          {
+            "name": "nombre",
+            "in": "path",
+            "required": true,
+            "description": "Nombre del fichero tal como aparece en el listado.",
+            "schema": { "type": "string", "pattern": "^respaldo_\\d{4}-\\d{2}-\\d{2}_\\d{6}(_\\d+)?\\.dump$" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Contenido del respaldo.",
+            "content": { "application/octet-stream": { "schema": { "type": "string", "format": "binary" } } }
+          },
+          "403": {
+            "description": "La cuenta no tiene el permiso `ajustes.editar` (`permiso_denegado`).",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "503": { "$ref": "#/components/responses/Unavailable" }
+        }
+      }
+    }
+  },
+
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Token devuelto por `POST /api/v1/auth/login`. Se envía en cada petición como `Authorization: Bearer <token>`. Sin él (o con él caducado) la API responde `401`."
+      }
+    },
+
+    "parameters": {
+      "limit": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "description": "Máximo de elementos por página (1-200).",
+        "schema": { "type": "integer", "default": 50, "minimum": 1, "maximum": 200 }
+      },
+      "offset": {
+        "name": "offset",
+        "in": "query",
+        "required": false,
+        "description": "Desplazamiento para paginar.",
+        "schema": { "type": "integer", "default": 0, "minimum": 0 }
+      },
+      "id": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "Identificador numérico del recurso.",
+        "schema": { "type": "integer", "minimum": 1 }
+      },
+      "productoId": {
+        "name": "productoId",
+        "in": "path",
+        "required": true,
+        "description": "Identificador del producto dentro de la orden.",
+        "schema": { "type": "integer", "minimum": 1 }
+      }
+    },
+
+    "responses": {
+      "BadRequest": {
+        "description": "Solicitud inválida: campo obligatorio ausente, formato incorrecto o valor fuera de las reglas de negocio. Ejemplos de `error.code`: `field_required`, `field_too_short`, `field_too_long`, `field_invalid`, `estado_invalido`, `genero_invalido`, `ci_invalido`, `telefono_invalido`, `usuario_invalido`, `contrasena_invalida`, `valor_negativo`, `valor_no_positivo`, `valor_demasiado_grande`, `precio_venta_bajo_costo`, `precio_rebaja_excesivo`, `rebaja_excesivo`, `fecha_vencida`, `edad_invalida`.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "NotFound": {
+        "description": "El recurso no existe.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "Forbidden": {
+        "description": "Sesión válida sin permiso para la operación: `permiso_denegado` con el permiso `modulo.accion` que falta, o reglas de protección (`rol_superior`, `ultimo_admin`).",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "Conflict": {
+        "description": "Conflicto de negocio o de integridad: referencia obligatoria, registro duplicado, stock insuficiente o transición de estado no permitida.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      },
+      "Unavailable": {
+        "description": "Base de datos no disponible.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+      }
+    },
+
+    "schemas": {
+      "Ajuste": {
+        "type": "object",
+        "required": ["id", "clave", "valor"],
+        "properties": {
+          "id": { "type": "integer" },
+          "clave": { "type": "string", "maxLength": 100, "example": "porPagina", "description": "Identificador estable del ajuste (un valor fijo, traducido en la pantalla)." },
+          "valor": { "type": "string", "maxLength": 500, "example": "20", "description": "Siempre texto: el cliente lo numérico y lo traduce a etiqueta." },
+          "fechaCreacion": { "type": "string", "format": "date-time" },
+          "fechaActualizacion": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AjusteList": {
+        "type": "object",
+        "required": ["total", "items"],
+        "properties": {
+          "total": { "type": "integer" },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/Ajuste" } }
+        }
+      },
+      "AjusteInput": {
+        "type": "object",
+        "required": ["valores"],
+        "description": "Lote completo de ajustes a guardar. Claves válidas: `vendedorPorDefecto`, `tipoPagoPorDefecto`, `clientePorDefecto`, `ordenCatalogo`, `paginaInicial`, `porPagina` (1–200), `stockMinimo` (0–1000), `diasVencimiento` (1–365), `respaldoIntervalo` (0–43200 minutos: `0` solo manual, `1440` cada día, `10080` cada semana, `43200` cada mes) y cualquier `defecto.<entidad>.<campo>` (valor por defecto de un desplegable del formulario de alta; la entidad va en minúsculas sin tildes y el campo en camelCase, p. ej. `defecto.producto.estado`).",
+        "properties": {
+          "valores": {
+            "type": "object",
+            "additionalProperties": { "type": "string", "maxLength": 500 },
+            "example": { "porPagina": "20", "tipoPagoPorDefecto": "YAPE" }
+          }
+        }
+      },
+      "AjusteAcuse": {
+        "type": "object",
+        "required": ["id", "actualizados"],
+        "properties": {
+          "id": { "type": "integer", "description": "Siempre 0: el upsert no devuelve una fila concreta." },
+          "actualizados": { "type": "integer", "example": 8, "description": "Ajustes escritos en este lote." }
+        }
+      },
+      "Respaldo": {
+        "type": "object",
+        "required": ["id", "nombre", "bytes", "creado"],
+        "description": "Un `.dump` generado con `pg_dump -Fc` y guardado en la carpeta de respaldos del servidor (`BACKUPS_DIR`). El campo `id` es siempre 0: la clave natural del fichero es su nombre.",
+        "properties": {
+          "id": { "type": "integer", "const": 0 },
+          "nombre": { "type": "string", "example": "respaldo_2026-09-30_153000.dump", "description": "Nombre propio del fichero dentro de la carpeta de respaldos." },
+          "bytes": { "type": "integer", "example": 2048, "description": "Tamaño en bytes." },
+          "creado": { "type": "string", "format": "date-time", "description": "Momento en que se escribió el fichero." }
+        }
+      },
+      "RespaldoList": {
+        "type": "object",
+        "required": ["total", "items"],
+        "properties": {
+          "total": { "type": "integer" },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/Respaldo" } }
+        }
+      },
+      "ImagenSubida": {
+        "type": "object",
+        "required": ["nombre", "datos"],
+        "properties": {
+          "nombre": { "type": "string", "maxLength": 255, "description": "Nombre original del fichero (solo se usa para mensajes de error)." },
+          "datos": { "type": "string", "description": "Contenido del fichero en base64 (acepta también data URL). Máximo 3 MB." }
+        }
+      },
+      "ImagenRuta": {
+        "type": "object",
+        "properties": {
+          "ruta": { "type": "string", "example": "/api/v1/archivos/imagenes/c6be341279c4b788.jpg", "description": "Ruta a guardar en el recurso (p. ej. `productos.imagen`)." },
+          "nombre": { "type": "string", "example": "c6be341279c4b788.jpg" },
+          "bytes": { "type": "integer", "example": 7250 }
+        }
+      },
+
+      "Error": {
+        "type": "object",
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": { "type": "string", "example": "stock_insuficiente" },
+              "message": { "type": "string", "example": "Stock insuficiente para \"Ibuprofeno 600 mg\": disponibles 3, solicitados 9999." }
+            }
+          }
+        }
+      },
+
+      "HealthStatus": {
+        "type": "object",
+        "required": ["status", "service", "version", "database", "checkedAt"],
+        "properties": {
+          "status": { "type": "string", "enum": ["ok", "degraded"] },
+          "service": { "type": "string", "example": "farmacia-api" },
+          "version": { "type": "string", "example": "0.1.0" },
+          "database": { "type": "string", "enum": ["up", "down"] },
+          "checkedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+
+      "Product": {
+        "type": "object",
+        "required": ["id", "nombre", "precioVenta", "stock", "estado", "agotado"],
+        "properties": {
+          "id": { "type": "integer", "format": "int64" },
+          "nombre": { "type": "string", "maxLength": 150, "example": "Ibuprofeno 600 mg" },
+          "imagen": { "type": "string", "maxLength": 500, "nullable": true, "description": "Ruta local (`/api/v1/archivos/imagenes/...`) o URL externa (no binarios)." },
+          "precioVenta": { "type": "number", "format": "double", "example": 2.45 },
+          "precioCompra": { "type": "number", "format": "double", "nullable": true, "example": 1.2 },
+          "precioRebaja": { "type": "number", "format": "double", "nullable": true, "description": "Máximo en Bs que se puede rebajar por unidad. `null` = sin límite, `0` = no se puede rebajar. Nunca supera `precioVenta`." },
+          "fechaVencimiento": { "type": "string", "format": "date", "nullable": true, "example": "2027-06-30" },
+          "stock": { "type": "integer", "minimum": 0 },
+          "categoriaId": { "type": "integer", "nullable": true },
+          "proveedorId": { "type": "integer", "nullable": true },
+          "presentacionId": { "type": "integer", "nullable": true },
+          "estado": { "type": "string", "enum": ["DISPONIBLE", "AGOTADO", "POR_VENCER", "DESCONTINUADO", "ELIMINADO"] },
+          "agotado": { "type": "boolean", "description": "Calculado: `stock <= 0` o `estado = AGOTADO`." }
+        }
+      },
+      "ProductList": {
+        "type": "object",
+        "required": ["total", "items"],
+        "properties": {
+          "total": { "type": "integer" },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/Product" } }
+        }
+      },
+      "ProductInput": {
+        "type": "object",
+        "required": ["nombre", "precioVenta"],
+        "properties": {
+          "nombre": { "type": "string", "maxLength": 150 },
+          "precioVenta": { "type": "number", "minimum": 0 },
+          "imagen": { "type": "string", "maxLength": 500, "nullable": true },
+          "precioCompra": { "type": "number", "minimum": 0, "nullable": true },
+          "precioRebaja": { "type": "number", "minimum": 0, "nullable": true, "description": "Máximo a rebajar por unidad; no puede superar `precioVenta`." },
+          "fechaVencimiento": { "type": "string", "format": "date", "nullable": true },
+          "stock": { "type": "integer", "minimum": 0, "default": 0 },
+          "categoriaId": { "type": "integer", "nullable": true },
+          "proveedorId": { "type": "integer", "nullable": true },
+          "presentacionId": { "type": "integer", "nullable": true },
+          "estado": { "type": "string", "enum": ["DISPONIBLE", "AGOTADO", "POR_VENCER", "DESCONTINUADO", "ELIMINADO"], "default": "DISPONIBLE" }
+        }
+      },
+      "ProductPatch": {
+        "type": "object",
+        "description": "Todos los campos son opcionales; los ausentes no se tocan y los `null` borran el valor.",
+        "properties": {
+          "nombre": { "type": "string", "maxLength": 150 },
+          "precioVenta": { "type": "number", "minimum": 0 },
+          "imagen": { "type": "string", "maxLength": 500, "nullable": true },
+          "precioCompra": { "type": "number", "minimum": 0, "nullable": true },
+          "precioRebaja": { "type": "number", "minimum": 0, "nullable": true, "description": "Máximo a rebajar por unidad; no puede superar `precioVenta`." },
+          "fechaVencimiento": { "type": "string", "format": "date", "nullable": true },
+          "stock": { "type": "integer", "minimum": 0 },
+          "categoriaId": { "type": "integer", "nullable": true },
+          "proveedorId": { "type": "integer", "nullable": true },
+          "presentacionId": { "type": "integer", "nullable": true },
+          "estado": { "type": "string", "enum": ["DISPONIBLE", "AGOTADO", "POR_VENCER", "DESCONTINUADO", "ELIMINADO"] }
+        }
+      },
+
+      "Categoria": {
+        "type": "object",
+        "required": ["id", "nombre", "estado"],
+        "properties": {
+          "id": { "type": "integer" },
+          "nombre": { "type": "string", "example": "Analgésicos" },
+          "estado": { "type": "string", "enum": ["ACTIVO", "INACTIVO", "BLOQUEADO", "ELIMINADO"] },
+          "fechaCreacion": { "type": "string", "format": "date-time" },
+          "fechaActualizacion": { "type": "string", "format": "date-time" }
+        }
+      },
+      "CategoriaList": {
+        "type": "object",
+        "required": ["total", "items"],
+        "properties": {
+          "total": { "type": "integer" },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/Categoria" } }
+        }
+      },
+      "Presentacion": {
+        "type": "object",
+        "required": ["id", "nombre", "estado"],
+        "properties": {
+          "id": { "type": "integer" },
+          "nombre": { "type": "string", "example": "Comprimido" },
+          "estado": { "type": "string", "enum": ["ACTIVO", "INACTIVO", "BLOQUEADO", "ELIMINADO"] },
+          "fechaCreacion": { "type": "string", "format": "date-time" },
+          "fechaActualizacion": { "type": "string", "format": "date-time" }
+        }
+      },
+      "PresentacionList": {
+        "type": "object",
+        "required": ["total", "items"],
+        "properties": {
+          "total": { "type": "integer" },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/Presentacion" } }
+        }
+      },
+      "NombreEstadoInput": {
+        "type": "object",
+        "required": ["nombre"],
+        "properties": {
+          "nombre": { "type": "string", "maxLength": 100 },
+          "estado": { "type": "string", "enum": ["ACTIVO", "INACTIVO", "BLOQUEADO", "ELIMINADO"], "default": "ACTIVO" }
+        }
+      },
+      "NombreEstadoPatch": {
+        "type": "object",
+        "minProperties": 1,
+        "properties": {
+          "nombre": { "type": "string", "maxLength": 100 },
+          "estado": { "type": "string", "enum": ["ACTIVO", "INACTIVO", "BLOQUEADO", "ELIMINADO"] }
+        }
+      },
+
+      "Cliente": {
+        "type": "object",
+        "required": ["id", "nombre", "estado"],
+        "properties": {
+          "id": { "type": "integer" },
+          "nombre": { "type": "string", "maxLength": 150 },
+          "apellido": { "type": "string", "maxLength": 100, "nullable": true },
+          "direccion": { "type": "string", "nullable": true },
+          "ciudad": { "type": "string", "nullable": true },
+          "genero": { "type": "string", "enum": ["M", "F", "O"], "nullable": true },
+          "ci": { "type": "string", "maxLength": 15, "nullable": true, "uniqueItems": true },
+          "telefono": { "type": "string", "maxLength": 20, "nullable": true },
+          "estado": { "type": "string", "enum": ["ACTIVO", "INACTIVO", "BLOQUEADO", "ELIMINADO"] },
+          "fechaCreacion": { "type": "string", "format": "date-time" },
+          "fechaActualizacion": { "type": "string", "format": "date-time" }
+        }
+      },
+      "ClienteList": {
+        "type": "object",
+        "required": ["total", "items"],
+        "properties": {
+          "total": { "type": "integer" },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/Cliente" } }
+        }
+      },
+      "ClienteInput": {
+        "type": "object",
+        "required": ["nombre", "apellido", "ci"],
+        "properties": {
+          "nombre": { "type": "string", "minLength": 2, "maxLength": 150 },
+          "apellido": { "type": "string", "minLength": 2, "maxLength": 100 },
+          "direccion": { "type": "string", "maxLength": 200, "nullable": true },
+          "ciudad": { "type": "string", "maxLength": 100, "nullable": true },
+          "genero": { "type": "string", "enum": ["M", "F", "O"], "nullable": true },
+          "ci": { "type": "string", "minLength": 7, "maxLength": 15, "pattern": "^[0-9]{7,15}$" },
+          "telefono": { "type": "string", "maxLength": 20, "nullable": true },
+          "estado": { "type": "string", "enum": ["ACTIVO", "INACTIVO", "BLOQUEADO", "ELIMINADO"], "default": "ACTIVO" }
+        }
+      },
+      "ClientePatch": {
+        "type": "object",
+        "minProperties": 1,
+        "properties": {
+          "nombre": { "type": "string", "minLength": 2, "maxLength": 150 },
+          "apellido": { "type": "string", "minLength": 2, "maxLength": 100 },
+          "direccion": { "type": "string", "maxLength": 200, "nullable": true },
+          "ciudad": { "type": "string", "maxLength": 100, "nullable": true },
+          "genero": { "type": "string", "enum": ["M", "F", "O"], "nullable": true },
+          "ci": { "type": "string", "maxLength": 15, "nullable": true },
+          "telefono": { "type": "string", "maxLength": 20, "nullable": true },
+          "estado": { "type": "string", "enum": ["ACTIVO", "INACTIVO", "BLOQUEADO", "ELIMINADO"] }
+        }
+      },
+
+      "Proveedor": {
+        "type": "object",
+        "required": ["id", "nombre", "estado"],
+        "properties": {
+          "id": { "type": "integer" },
+          "nombre": { "type": "string", "maxLength": 150 },
+          "direccion": { "type": "string", "nullable": true },
+          "ciudad": { "type": "string", "nullable": true },
+          "telefono": { "type": "string", "nullable": true },
+          "estado": { "type": "string", "enum": ["ACTIVO", "INACTIVO", "BLOQUEADO", "ELIMINADO"] },
+          "fechaCreacion": { "type": "string", "format": "date-time" },
+          "fechaActualizacion": { "type": "string", "format": "date-time" }
+        }
+      },
+      "ProveedorList": {
+        "type": "object",
+        "required": ["total", "items"],
+        "properties": {
+          "total": { "type": "integer" },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/Proveedor" } }
+        }
+      },
+      "ProveedorInput": {
+        "type": "object",
+        "required": ["nombre"],
+        "properties": {
+          "nombre": { "type": "string", "maxLength": 150 },
+          "direccion": { "type": "string", "maxLength": 200, "nullable": true },
+          "ciudad": { "type": "string", "maxLength": 100, "nullable": true },
+          "telefono": { "type": "string", "maxLength": 20, "nullable": true },
+          "estado": { "type": "string", "enum": ["ACTIVO", "INACTIVO", "BLOQUEADO", "ELIMINADO"], "default": "ACTIVO" }
+        }
+      },
+      "ProveedorPatch": {
+        "type": "object",
+        "minProperties": 1,
+        "properties": {
+          "nombre": { "type": "string", "maxLength": 150 },
+          "direccion": { "type": "string", "maxLength": 200, "nullable": true },
+          "ciudad": { "type": "string", "maxLength": 100, "nullable": true },
+          "telefono": { "type": "string", "maxLength": 20, "nullable": true },
+          "estado": { "type": "string", "enum": ["ACTIVO", "INACTIVO", "BLOQUEADO", "ELIMINADO"] }
+        }
+      },
+
+      "Empleado": {
+        "type": "object",
+        "required": ["id", "nombre", "estado"],
+        "properties": {
+          "id": { "type": "integer" },
+          "nombre": { "type": "string", "maxLength": 150 },
+          "apellido": { "type": "string", "maxLength": 100, "nullable": true },
+          "direccion": { "type": "string", "nullable": true },
+          "ciudad": { "type": "string", "nullable": true },
+          "rol": { "type": "string", "nullable": true, "example": "VENDEDOR" },
+          "permisos": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Permisos `modulo.accion` del rol de la cuenta vinculada; vacío sin usuario activo.",
+            "example": ["ventas.crear", "ventas.ver"]
+          },
+          "edad": { "type": "integer", "minimum": 18, "maximum": 120, "nullable": true },
+          "telefono": { "type": "string", "nullable": true },
+          "estado": { "type": "string", "enum": ["ACTIVO", "VACACIONES", "LICENCIA", "INACTIVO", "ELIMINADO"] },
+          "fechaCreacion": { "type": "string", "format": "date-time" },
+          "fechaActualizacion": { "type": "string", "format": "date-time" }
+        }
+      },
+      "EmpleadoList": {
+        "type": "object",
+        "required": ["total", "items"],
+        "properties": {
+          "total": { "type": "integer" },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/Empleado" } }
+        }
+      },
+      "EmpleadoInput": {
+        "type": "object",
+        "required": ["nombre", "apellido"],
+        "properties": {
+          "nombre": { "type": "string", "minLength": 2, "maxLength": 150 },
+          "apellido": { "type": "string", "minLength": 2, "maxLength": 100 },
+          "direccion": { "type": "string", "maxLength": 200, "nullable": true },
+          "ciudad": { "type": "string", "maxLength": 100, "nullable": true },
+          "edad": { "type": "integer", "minimum": 18, "maximum": 120, "nullable": true },
+          "telefono": { "type": "string", "maxLength": 20, "nullable": true },
+          "estado": { "type": "string", "enum": ["ACTIVO", "VACACIONES", "LICENCIA", "INACTIVO", "ELIMINADO"], "default": "ACTIVO" }
+        }
+      },
+      "EmpleadoPatch": {
+        "type": "object",
+        "minProperties": 1,
+        "properties": {
+          "nombre": { "type": "string", "minLength": 2, "maxLength": 150 },
+          "apellido": { "type": "string", "minLength": 2, "maxLength": 100 },
+          "direccion": { "type": "string", "maxLength": 200, "nullable": true },
+          "ciudad": { "type": "string", "maxLength": 100, "nullable": true },
+          "edad": { "type": "integer", "minimum": 18, "maximum": 120, "nullable": true },
+          "telefono": { "type": "string", "maxLength": 20, "nullable": true },
+          "estado": { "type": "string", "enum": ["ACTIVO", "VACACIONES", "LICENCIA", "INACTIVO", "ELIMINADO"] }
+        }
+      },
+
+      "Sesion": {
+        "type": "object",
+        "required": ["token", "expiraEn", "usuario"],
+        "description": "Sesión abierta por el login. `token` se envía en `Authorization: Bearer <token>` en todas las peticiones; se invalida con `POST /api/v1/auth/logout`.",
+        "properties": {
+          "token": { "type": "string", "example": "18739ff7c19484c7…" },
+          "expiraEn": { "type": "string", "format": "date-time", "description": "Fin de validez de la sesión (30 días con `recuerdame`, 24 h sin él)." },
+          "usuario": { "$ref": "#/components/schemas/Usuario" }
+        }
+      },
+
+      "Usuario": {
+        "type": "object",
+        "required": ["id", "rolId", "nivelUsuario", "nombreUsuario", "estado"],
+        "description": "La contraseña no aparece jamás en las respuestas. `nivelUsuario` es el nombre del rol (alias histórico de `rolId`); `permisos` solo se rellena en el login y en `GET /auth/me`.",
+        "properties": {
+          "id": { "type": "integer" },
+          "empleadoId": { "type": "integer", "nullable": true },
+          "rolId": { "type": "integer", "description": "Rol asignado (`Roles.Rol_ID`)." },
+          "nivelUsuario": { "type": "string", "example": "ADMIN", "description": "Nombre del rol; alias de `rolId` para clientes históricos." },
+          "permisos": { "type": "array", "items": { "type": "string", "example": "productos.editar" }, "description": "Permisos del rol en formato `modulo.accion`." },
+          "nombreUsuario": { "type": "string", "example": "mlopez" },
+          "estado": { "type": "string", "enum": ["ACTIVO", "INACTIVO", "BLOQUEADO", "ELIMINADO"] },
+          "fechaCreacion": { "type": "string", "format": "date-time" },
+          "fechaActualizacion": { "type": "string", "format": "date-time" }
+        }
+      },
+      "UsuarioList": {
+        "type": "object",
+        "required": ["total", "items"],
+        "properties": {
+          "total": { "type": "integer" },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/Usuario" } }
+        }
+      },
+      "UsuarioInput": {
+        "type": "object",
+        "required": ["nombreUsuario", "contrasena", "rolId"],
+        "properties": {
+          "nombreUsuario": { "type": "string", "maxLength": 50 },
+          "contrasena": { "type": "string", "maxLength": 72, "writeOnly": true, "description": "Se guarda como hash bcrypt (máximo 72 bytes); nunca se devuelve." },
+          "rolId": { "type": "integer", "description": "Rol asignado; el catálogo está en `GET /api/v1/roles`. No puede dar permisos que la cuenta que crea el usuario no tenga." },
+          "empleadoId": { "type": "integer", "nullable": true },
+          "estado": { "type": "string", "enum": ["ACTIVO", "INACTIVO", "BLOQUEADO", "ELIMINADO"], "default": "ACTIVO" }
+        }
+      },
+      "UsuarioPatch": {
+        "type": "object",
+        "minProperties": 1,
+        "properties": {
+          "nombreUsuario": { "type": "string", "maxLength": 50 },
+          "contrasena": { "type": "string", "maxLength": 72, "writeOnly": true, "description": "Cambia la contraseña (hash bcrypt). Exige además `claveAdmin`: sin él `400 clave_admin_requerida`; si no coincide con la clave de la cuenta en sesión `403 clave_admin_incorrecta`." },
+          "claveAdmin": { "type": "string", "maxLength": 255, "writeOnly": true, "description": "Clave propia de quien hace la petición; solo se usa cuando el body lleva `contrasena`." },
+          "rolId": { "type": "integer" },
+          "empleadoId": { "type": "integer", "nullable": true },
+          "estado": { "type": "string", "enum": ["ACTIVO", "INACTIVO", "BLOQUEADO", "ELIMINADO"] }
+        }
+      },
+
+      "Rol": {
+        "type": "object",
+        "required": ["id", "nombre", "esSistema", "estado", "permisos"],
+        "description": "Rol de acceso (RBAC). `permisos` es el conjunto de `modulo.accion` que da el rol; el rol ADMIN tiene los 44 y no se modifica.",
+        "properties": {
+          "id": { "type": "integer" },
+          "nombre": { "type": "string", "maxLength": 50, "example": "VENDEDOR" },
+          "descripcion": { "type": "string", "nullable": true, "maxLength": 255 },
+          "esSistema": { "type": "boolean", "description": "Rol de la semilla: no se borra." },
+          "estado": { "type": "string", "enum": ["ACTIVO", "INACTIVO", "BLOQUEADO", "ELIMINADO"] },
+          "permisos": { "type": "array", "items": { "type": "string", "example": "ventas.crear" } },
+          "fechaCreacion": { "type": "string", "format": "date-time" },
+          "fechaActualizacion": { "type": "string", "format": "date-time" }
+        }
+      },
+      "RolList": {
+        "type": "object",
+        "required": ["total", "items"],
+        "properties": {
+          "total": { "type": "integer" },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/Rol" } }
+        }
+      },
+      "RolInput": {
+        "type": "object",
+        "required": ["nombre"],
+        "properties": {
+          "nombre": { "type": "string", "minLength": 3, "maxLength": 50 },
+          "descripcion": { "type": "string", "maxLength": 255, "nullable": true },
+          "permisos": { "type": "array", "items": { "type": "string", "example": "productos.editar" }, "default": [] }
+        }
+      },
+      "RolPatch": {
+        "type": "object",
+        "minProperties": 1,
+        "properties": {
+          "nombre": { "type": "string", "minLength": 3, "maxLength": 50 },
+          "descripcion": { "type": "string", "maxLength": 255, "nullable": true, "description": "`''` limpia la descripción." },
+          "estado": { "type": "string", "enum": ["ACTIVO", "INACTIVO", "BLOQUEADO", "ELIMINADO"] },
+          "permisos": { "type": "array", "items": { "type": "string" }, "description": "Reemplaza el conjunto completo de permisos." }
+        }
+      },
+
+      "Auditoria": {
+        "type": "object",
+        "required": ["id", "fecha", "accion", "exitoso", "resumen"],
+        "description": "Evento de auditoría: quién hizo qué, cuándo, desde dónde y con qué resultado. Los intentos rechazados también se registran (`exitoso: false`). `detalles` solo lo aportan las rutas sensibles y nunca contiene contraseñas ni tokens.",
+        "properties": {
+          "id": { "type": "integer" },
+          "fecha": { "type": "string", "format": "date-time" },
+          "usuarioId": { "type": "integer", "nullable": true, "description": "Instantánea de la cuenta; `null` en login/primer arranque." },
+          "nombreUsuario": { "type": "string", "nullable": true },
+          "rol": { "type": "string", "nullable": true, "description": "Rol de la cuenta en ese momento." },
+          "accion": { "type": "string", "example": "ACTUALIZAR" },
+          "exitoso": { "type": "boolean" },
+          "codigoError": { "type": "string", "nullable": true, "example": "permiso_denegado" },
+          "entidad": { "type": "string", "nullable": true, "example": "usuarios" },
+          "entidadId": { "type": "integer", "nullable": true },
+          "resumen": { "type": "string", "example": "PUT /api/v1/usuarios/27 -> 200" },
+          "detalles": { "type": "object", "nullable": true, "description": "Detalle explícito: `nombre` del registro, `cambios` con `antes`/`despues` de los campos modificados (productos, clientes, categorías, usuarios...), transiciones de estado, permisos antes/después... Jamás credenciales: `contrasena`/`claveAdmin`/`token` se eliminan antes de guardar." },
+          "ip": { "type": "string", "nullable": true }
+        }
+      },
+      "AuditoriaList": {
+        "type": "object",
+        "required": ["total", "items"],
+        "properties": {
+          "total": { "type": "integer" },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/Auditoria" } }
+        }
+      },
+
+      "OrdenPedido": {
+        "type": "object",
+        "required": ["id", "fechaOrden", "pagos", "total", "estado"],
+        "properties": {
+          "id": { "type": "integer", "format": "int64" },
+          "fechaOrden": { "type": "string", "format": "date-time" },
+          "clienteId": { "type": "integer", "nullable": true },
+          "nombreCliente": { "type": "string", "nullable": true, "description": "Copia del nombre al crear la orden." },
+          "empleadoId": { "type": "integer", "nullable": true },
+          "pagos": { "type": "array", "items": { "$ref": "#/components/schemas/Pago" }, "description": "Desglose de pagos (efectivo + QR...); la suma cuadra con `totalPagar`." },
+          "total": { "type": "number", "format": "double", "example": 7.35, "description": "Suma de las líneas (subtotal)." },
+          "rebaja": { "type": "number", "format": "double", "minimum": 0, "default": 0, "description": "Rebaja hecha al cobrar: se descuenta del total." },
+          "iva": { "type": "number", "format": "double", "minimum": 0, "default": 0, "description": "IVA cobrado (14.94 % de `total − rebaja` si `factura`, si no 0). Calculado por el servidor." },
+          "factura": { "type": "boolean", "default": false, "description": "¿Se cobra con factura? Activa el IVA boliviano." },
+          "totalPagar": { "type": "number", "format": "double", "description": "`(total − rebaja) + iva`: lo que deben sumar los pagos. Calculado por el servidor." },
+          "estado": { "type": "string", "enum": ["PENDIENTE", "PAGADO", "CANCELADO", "DEVUELTO", "ELIMINADO"] },
+          "fechaCreacion": { "type": "string", "format": "date-time" },
+          "fechaActualizacion": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Pago": {
+        "type": "object",
+        "required": ["metodoPago", "monto"],
+        "properties": {
+          "id": { "type": "integer", "format": "int64" },
+          "metodoPago": { "type": "string", "enum": ["EFECTIVO", "TARJETA", "YAPE", "PLIN", "TRANSFERENCIA"] },
+          "monto": { "type": "number", "format": "double", "example": 5.0 },
+          "referencia": { "type": "string", "nullable": true, "description": "Nº de operación (pagos por QR/transferencia), opcional." },
+          "estado": { "type": "string", "enum": ["ACTIVO", "INACTIVO", "BLOQUEADO", "ELIMINADO"] }
+        }
+      },
+      "OrdenConDetalles": {
+        "allOf": [
+          { "$ref": "#/components/schemas/OrdenPedido" },
+          {
+            "type": "object",
+            "required": ["detalles"],
+            "properties": {
+              "detalles": { "type": "array", "items": { "$ref": "#/components/schemas/DetalleOrden" } }
+            }
+          }
+        ]
+      },
+      "OrdenList": {
+        "type": "object",
+        "required": ["total", "items"],
+        "properties": {
+          "total": { "type": "integer" },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/OrdenPedido" } }
+        }
+      },
+      "OrdenInput": {
+        "type": "object",
+        "required": ["pagos", "items"],
+        "properties": {
+          "pagos": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Desglose de pagos; la suma de montos debe cuadrar con `totalPagar` (total − rebaja + IVA si es factura).",
+            "items": {
+              "type": "object",
+              "required": ["metodoPago", "monto"],
+              "properties": {
+                "metodoPago": { "type": "string", "enum": ["EFECTIVO", "TARJETA", "YAPE", "PLIN", "TRANSFERENCIA"] },
+                "monto": { "type": "number", "minimum": 0.01 },
+                "referencia": { "type": "string", "maxLength": 100, "nullable": true }
+              }
+            }
+          },
+          "clienteId": { "type": "integer", "nullable": true },
+          "nombreCliente": { "type": "string", "maxLength": 150, "nullable": true },
+          "empleadoId": { "type": "integer", "nullable": true },
+          "rebaja": { "type": "number", "minimum": 0, "default": 0, "description": "Rebaja (Bs) hecha al cliente; no puede superar el total ni el máximo a rebajar de los productos (`precioRebaja` de cada línea)." },
+          "factura": { "type": "boolean", "default": false, "description": "Cobra IVA 14.94 % sobre `(total − rebaja)`; los pagos cuadran contra `totalPagar`." },
+          "items": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["productoId", "cantidad"],
+              "properties": {
+                "productoId": { "type": "integer", "minimum": 1 },
+                "cantidad": { "type": "integer", "minimum": 1 }
+              }
+            }
+          }
+        }
+      },
+      "EstadoOrdenInput": {
+        "type": "object",
+        "required": ["estado"],
+        "properties": {
+          "estado": { "type": "string", "enum": ["PENDIENTE", "PAGADO", "CANCELADO", "DEVUELTO", "ELIMINADO"] }
+        }
+      },
+      "DetalleOrden": {
+        "type": "object",
+        "required": ["productoId", "ordenId", "nombreProducto", "cantidad", "precioVenta", "montoTotal"],
+        "properties": {
+          "productoId": { "type": "integer" },
+          "ordenId": { "type": "integer" },
+          "nombreProducto": { "type": "string" },
+          "cantidad": { "type": "integer", "minimum": 1 },
+          "precioVenta": { "type": "number", "format": "double" },
+          "montoTotal": { "type": "number", "format": "double", "example": 7.35, "description": "`cantidad × precioVenta`, redondeado a 2 decimales." }
+        }
+      },
+      "DetalleList": {
+        "type": "object",
+        "required": ["total", "items"],
+        "properties": {
+          "total": { "type": "integer" },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/DetalleOrden" } }
+        }
+      },
+      "DetalleInput": {
+        "type": "object",
+        "required": ["productoId", "cantidad"],
+        "properties": {
+          "productoId": { "type": "integer", "minimum": 1 },
+          "cantidad": { "type": "integer", "minimum": 1 }
+        }
+      },
+
+      "Factura": {
+        "type": "object",
+        "required": ["id", "fechaFactura", "subtotal", "rebaja", "iva", "total", "estado"],
+        "properties": {
+          "id": { "type": "integer", "description": "`Factura_Numero`." },
+          "fechaFactura": { "type": "string", "format": "date-time" },
+          "empleadoId": { "type": "integer", "nullable": true },
+          "clienteId": { "type": "integer", "nullable": true },
+          "ordenId": { "type": "integer", "nullable": true, "description": "Único: una factura por orden." },
+          "subtotal": { "type": "number", "format": "double", "description": "Total de líneas de la orden al emitir." },
+          "rebaja": { "type": "number", "format": "double", "description": "Rebaja cobrada (instantánea de la orden)." },
+          "iva": { "type": "number", "format": "double", "description": "IVA cobrado (14.94 % cuando la venta fue factura)." },
+          "total": { "type": "number", "format": "double", "description": "`subtotal - rebaja + iva` (calculado)." },
+          "estado": { "type": "string", "enum": ["EMITIDA", "ANULADA", "ELIMINADO"] },
+          "fechaCreacion": { "type": "string", "format": "date-time" },
+          "fechaActualizacion": { "type": "string", "format": "date-time" }
+        }
+      },
+      "FacturaList": {
+        "type": "object",
+        "required": ["total", "items"],
+        "properties": {
+          "total": { "type": "integer" },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/Factura" } }
+        }
+      },
+      "FacturaInput": {
+        "type": "object",
+        "required": ["ordenId"],
+        "properties": {
+          "ordenId": { "type": "integer", "minimum": 1 },
+          "empleadoId": { "type": "integer", "nullable": true, "description": "Por defecto, el de la orden." },
+          "clienteId": { "type": "integer", "nullable": true, "description": "Por defecto, el de la orden." }
+        }
+      },
+      "EstadoFacturaInput": {
+        "type": "object",
+        "required": ["estado"],
+        "properties": {
+          "estado": { "type": "string", "enum": ["EMITIDA", "ANULADA", "ELIMINADO"] }
+        }
+      },
+
+      "VentaProducto": {
+        "type": "object",
+        "required": ["productoId", "nombre", "unidades", "monto"],
+        "properties": {
+          "productoId": { "type": "integer" },
+          "nombre": { "type": "string" },
+          "unidades": { "type": "integer", "description": "Suma de `cantidad` de las líneas no anuladas." },
+          "monto": { "type": "number", "format": "double", "description": "Suma de `monto_total`, en soles." }
+        }
+      },
+      "VentaProductoList": {
+        "type": "object",
+        "required": ["total", "items"],
+        "properties": {
+          "total": { "type": "integer" },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/VentaProducto" } }
+        }
+      }
+    }
+  }
+}

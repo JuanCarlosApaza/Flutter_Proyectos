@@ -1,0 +1,53 @@
+Running `(cd C:\Users\carlo\AppData\Local\Pub\Cache\hosted\pub.dev\llamadart-0.10.0\; ANDROID_HOME=C:\Users\carlo\AppData\Local\Android\Sdk APPDATA=C:\Users\carlo\AppData\Roaming LOCALAPPDATA=C:\Users\carlo\AppData\Local PATH=c:\Users\carlo\AppData\Roaming\Code\User\globalStorage\github.copilot-chat\debugCommand;c:\Users\carlo\AppData\Roaming\Code\User\globalStorage\github.copilot-chat\copilotCli;C:\flutter\bin\;C:\Program Files\Eclipse Adoptium\jdk-21.0.9.10-hotspot\bin;C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:\WINDOWS\System32\WindowsPowerShell\v1.0\;C:\WINDOWS\System32\OpenSSH\;C:\Program Files\nodejs\;C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common;C:\Program Files\Git\cmd;C:\Users\carlo\AppData\Local\Android\Sdk\emulator;C:\Users\carlo\AppData\Local\Android\Sdk\platform-tools;C:\Program Files\PostgreSQL\18\bin;C:\flutter\bin;C:\Program Files\dotnet\;C:\Program Files (x86)\Windows Kits\10\Windows Performance Toolkit\;C:\Users\carlo\AppData\Local\Programs\Python\Python313\Scripts\;C:\Users\carlo\AppData\Local\Programs\Python\Python313\;C:\Users\carlo\AppData\Local\Programs\Python\Python311\Scripts\;C:\Users\carlo\AppData\Local\Programs\Python\Python311\;C:\Program Files\Eclipse Adoptium\jdk-21.0.9.10-hotspot\bin;C:\Program Files\Eclipse Adoptium\jdk-21.0.9.10-hotspot\bin;C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:\WINDOWS\System32\WindowsPowerShell\v1.0\;C:\WINDOWS\System32\OpenSSH\;C:\Program Files\nodejs\;C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common;C:\Program Files\Git\cmd;C:\Users\carlo\AppData\Local\Microsoft\WindowsApps;C:\Users\carlo\AppData\Local\Programs\Microsoft VS Code\bin;C:\Users\carlo\AppData\Roaming\npm;C:\Users\carlo\AppData\Local\Android\Sdk\emulator;C:\Users\carlo\AppData\Local\Android\Sdk\platform-tools;C:\Users\carlo\AppData\Local\Python\bin;C:\Program Files\PostgreSQL\18\bin;C:\flutter\bin;C:\Users\carlo\.dotnet\tools;C:\Users\carlo\AppData\Local\Microsoft\WinGet\Links;;C:\Users\carlo\AppData\Local\Programs\Ollama;c:\Users\carlo\.vscode\extensions\vscjava.vscode-java-debug-0.59.0\bundled\scripts\noConfigScripts;c:\Users\carlo\.vscode\extensions\ms-python.debugpy-2026.6.0-win32-x64\bundled\scripts\noConfigScripts PROCESSOR_ARCHITECTURE=AMD64 PROGRAMDATA=C:\ProgramData SYSTEMDRIVE=C: SYSTEMROOT=C:\WINDOWS TEMP=C:\Users\carlo\AppData\Local\Temp TMP=C:\Users\carlo\AppData\Local\Temp USERPROFILE=C:\Users\carlo WINDIR=C:\WINDOWS C:\flutter\bin\cache\dart-sdk\bin\dart.exe --packages=C:\Users\carlo\Documents\Flutter\Farmacia\farmacia\backend\.dart_tool\package_config.json C:\Users\carlo\Documents\Flutter\Farmacia\farmacia\backend\.dart_tool\hooks_runner\llamadart\8e04c28b44\hook.dill --config=C:\Users\carlo\Documents\Flutter\Farmacia\farmacia\backend\.dart_tool\hooks_runner\llamadart\8e04c28b44\input.json )`.
+INFO: 2026-10-04 22:46:24.508133: Hook Start: windows-x64
+
+INFO: 2026-10-04 22:46:24.514413: Selected native runtimes: llama_cpp, litert_lm.
+
+INFO: 2026-10-04 22:46:24.516485: Using native runtime source: leehack/llamadart-native@v0.5.0
+
+INFO: 2026-10-04 22:46:24.530065: Downloading native bundle: https://github.com/leehack/llamadart-native/releases/download/v0.5.0/llamadart-native-windows-x64-v0.5.0.tar.gz
+
+INFO: 2026-10-04 22:54:49.907097: Saved native bundle to C:\Users\carlo\AppData\Local\Pub\Cache\hosted\pub.dev\llamadart-0.10.0\.dart_tool\llamadart\native_bundles\v0.5.0\windows-x64\llamadart-native-windows-x64-v0.5.0.tar.gz
+
+INFO: 2026-10-04 22:54:54.129192: Extracted native bundle to C:\Users\carlo\AppData\Local\Pub\Cache\hosted\pub.dev\llamadart-0.10.0\.dart_tool\llamadart\native_bundles\v0.5.0\windows-x64\extracted
+
+INFO: 2026-10-04 22:54:54.463037: Reporting native library `ggml-base.dll` as code asset `package:llamadart/ggml-base`.
+
+INFO: 2026-10-04 22:54:54.463037: Reporting native library `ggml-cpu.dll` as code asset `package:llamadart/ggml-cpu`.
+
+INFO: 2026-10-04 22:54:54.464037: Reporting native library `ggml-vulkan.dll` as code asset `package:llamadart/ggml-vulkan`.
+
+INFO: 2026-10-04 22:54:54.464037: Reporting native library `ggml.dll` as code asset `package:llamadart/ggml`.
+
+INFO: 2026-10-04 22:54:54.464037: Reporting native library `llama-common.dll` as code asset `package:llamadart/llama-common`.
+
+INFO: 2026-10-04 22:54:54.464037: Reporting native library `llama.dll` as code asset `package:llamadart/llamadart`.
+
+INFO: 2026-10-04 22:54:54.465038: Reporting native library `llamadart.dll` as code asset `package:llamadart/llamadart_wrapper`.
+
+INFO: 2026-10-04 22:54:54.465038: Reporting native library `mtmd.dll` as code asset `package:llamadart/mtmd`.
+
+INFO: 2026-10-04 22:54:54.465038: Reporting native library `vcomp140.dll` as code asset `package:llamadart/vcomp140`.
+
+INFO: 2026-10-04 22:54:54.467393: Downloading LiteRT-LM bundle from https://github.com/leehack/litert-lm-native/releases/download/v0.17.0-6/litert-lm-native-runtime-windows-x64-v0.17.0-6.tar.gz
+
+INFO: 2026-10-04 22:55:16.142561: Saved LiteRT-LM bundle to C:\Users\carlo\AppData\Local\Pub\Cache\hosted\pub.dev\llamadart-0.10.0\.dart_tool\llamadart\litert_lm\0.17.0-6\litert-lm-native-runtime-windows-x64-v0.17.0-6.tar.gz
+
+INFO: 2026-10-04 22:55:16.837676: Extracted LiteRT-LM bundle to C:\Users\carlo\AppData\Local\Pub\Cache\hosted\pub.dev\llamadart-0.10.0\.dart_tool\llamadart\litert_lm\0.17.0-6\windows/x64
+
+INFO: 2026-10-04 22:55:16.873440: Reporting LiteRT-LM library `LiteRtLm.dll` as code asset `package:llamadart/litert_lm_LiteRtLm`.
+
+INFO: 2026-10-04 22:55:17.035234: Reporting LiteRT-LM library `dxcompiler.dll` as code asset `package:llamadart/litert_lm_dxcompiler`.
+
+INFO: 2026-10-04 22:55:17.069051: Reporting LiteRT-LM library `dxil.dll` as code asset `package:llamadart/litert_lm_dxil`.
+
+INFO: 2026-10-04 22:55:17.101560: Reporting LiteRT-LM library `libGemmaModelConstraintProvider.dll` as code asset `package:llamadart/litert_lm_GemmaModelConstraintProvider`.
+
+INFO: 2026-10-04 22:55:17.132561: Reporting LiteRT-LM library `libLiteRt.dll` as code asset `package:llamadart/litert_lm_LiteRt`.
+
+INFO: 2026-10-04 22:55:17.162961: Reporting LiteRT-LM library `libLiteRtTopKWebGpuSampler.dll` as code asset `package:llamadart/litert_lm_LiteRtTopKWebGpuSampler`.
+
+INFO: 2026-10-04 22:55:17.169081: Reporting LiteRT-LM library `libLiteRtWebGpuAccelerator.dll` as code asset `package:llamadart/litert_lm_LiteRtWebGpuAccelerator`.
+
+INFO: 2026-10-04 22:55:17.174495: Reporting LiteRT-LM library `libwebgpu_dawn.dll` as code asset `package:llamadart/litert_lm_webgpu_dawn`.
+

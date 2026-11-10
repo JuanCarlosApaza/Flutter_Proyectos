@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(psql:*)",
+      "powershell",
+      "Shell(powershell -NoProfile -Command \"Get-Content 'C:\\Users\\carlo\\Documents\\Flutter\\ventas\\backend\\sql\\reset_ventas.sql' | Select-Object -Last 45\")",
+      "Shell(dart:*)",
+      "Shell(powershell -NoProfile -Command \"try { $null = Get-Content -Raw 'doc\\openapi.json' | ConvertFrom-Json; Write-Output 'JSON OK' } catch { Write-Output ('JSON MAL: ' + $_.Exception.Message) }\")",
+      "Shell(powershell -NoProfile -Command \"Get-Content 'C:\\Users\\carlo\\AppData\\Local\\Temp\\commandcode\\shellout\\2026-10-06T08-51-54-677Z-s13ezk20.log' -Raw\")",
+      "Shell(powershell -NoProfile -Command \"$env:PORT='8081'; dart run bin/server.dart\")",
+      "Shell(powershell -NoProfile -Command \"$env:PORT='8090'; dart run bin/server.dart\")",
+      "Shell(powershell -NoProfile -Command \"try { (Invoke-WebRequest -Uri 'http://localhost:8090/api/v1/health' -UseBasicParsing -TimeoutSec 10).Content } catch { 'no responde: ' + $_.Exception.Message }\")",
+      "Shell(powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\smoke_test.ps1 -Base http://localhost:8090 -Usuario carlos_admin -Contrasena qwerty2424)"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  }
+}

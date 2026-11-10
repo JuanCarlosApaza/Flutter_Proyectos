@@ -1,0 +1,21 @@
+{
+  "assets": {},
+  "config": {
+    "build_asset_types": [
+      "code_assets/code"
+    ],
+    "extensions": {
+      "code_assets": {
+        "link_mode_preference": "dynamic",
+        "target_architecture": "x64",
+        "target_os": "windows"
+      }
+    },
+    "linking_enabled": true
+  },
+  "out_dir_shared": "C:\\Users\\carlo\\Documents\\Flutter\\Farmacia\\farmacia\\backend\\.dart_tool\\hooks_runner\\shared\\llamadart\\build\\",
+  "out_file": "C:\\Users\\carlo\\Documents\\Flutter\\Farmacia\\farmacia\\backend\\.dart_tool\\hooks_runner\\llamadart\\c8cf94f9cf\\output.json",
+  "package_name": "llamadart",
+  "package_root": "C:\\Users\\carlo\\AppData\\Local\\Pub\\Cache\\hosted\\pub.dev\\llamadart-0.10.0\\",
+  "user_defines": {}
+}

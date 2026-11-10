@@ -1,0 +1,23 @@
+name: farmacia_backend
+description: "API REST de la farmacia - Clean Architecture (Dart + Shelf + PostgreSQL)"
+publish_to: "none"
+version: 0.1.0
+
+environment:
+  sdk: ^3.13.3
+
+dependencies:
+  # HTTP server minimalista y con funciones (middleware, routers)
+  shelf: ^1.4.2
+  # Enrutado declarativo tipo @Get('/ruta')
+  shelf_router: ^1.1.4
+  # Cliente PostgreSQL nativo (pool de conexiones, transacciones, TLS)
+  postgres: ^3.5.4
+  shelf_swagger_ui: ^2.0.0
+  bcrypt: ^1.2.0
+  sqlite3: ^3.7.0
+  llamadart: ^0.10.0
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.0
